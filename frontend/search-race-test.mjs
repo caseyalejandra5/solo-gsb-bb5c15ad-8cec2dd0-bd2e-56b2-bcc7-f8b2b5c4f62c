@@ -7,7 +7,9 @@
 //  5. 批量提交载荷的 document_id 与区间属于发起检索时的文档与关键词，
 //     结果提示绑定已检索关键词；重复项跳过规则保留；
 //  6. 重叠命中（"aa" in "aaa"）全量返回且默认全选；
-//  7. 切文档后旧状态清空；旧文档在途检索迟到不落到新文档。
+//  7. 切文档后旧状态清空；旧文档在途检索迟到不落到新文档；
+//  8. 批量提交在途时重新检索同一关键词：旧提交立即解除对面板的占用，
+//     其迟到成功 / 失败不覆盖新检索的命中、结果提示或按钮状态。
 import { JSDOM } from 'jsdom'
 
 const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></html>', {
@@ -81,6 +83,20 @@ function holdBatch() {
   let resolve
   const promise = new Promise((r) => {
     resolve = () => r(jsonRes({ created: [], skipped: [], codings: [] }))
+  })
+  held.set('batch', { resolve, promise })
+}
+// 挂起、且释放时以失败回包的批量提交
+function holdBatchFailure() {
+  let resolve
+  const promise = new Promise((r) => {
+    resolve = () =>
+      r({
+        ok: false,
+        status: 500,
+        statusText: 'Server Error',
+        json: () => Promise.resolve({ detail: '批量写入失败' }),
+      })
   })
   held.set('batch', { resolve, promise })
 }
@@ -370,6 +386,81 @@ await act(async () => {
 })
 check('文档 2 迟到回包后文档 1 面板仍无命中', !container.querySelector('.match-head'))
 check('最终未向文档 2 批量写入', batchCalls.every((c) => c.document_id !== 2), batchCalls)
+
+// ---------- 用例 10：提交在途时重新检索同一关键词，旧提交的迟到成功不得占用面板 ----------
+errors.length = 0
+await typeKeyword('焦虑')
+await submitSearch()
+check('前置：A 命中显示', /「焦虑」命中 2 处/.test(container.textContent))
+await chooseCode()
+holdBatch()
+await act(async () => {
+  applyBtn().click()
+  await tick()
+})
+check('提交在途显示提交中', applyBtn()?.textContent.includes('提交中'), applyBtn()?.textContent)
+
+// 输入不变，直接再次提交检索表单：同一关键词的重新检索
+await submitSearch()
+check('重新检索后新命中列表渲染', /「焦虑」命中 2 处/.test(container.textContent))
+check(
+  '旧提交不再占用面板：按钮恢复可提交态',
+  applyBtn()?.textContent.includes('批量编码（2）') && !applyBtn()?.disabled,
+  applyBtn()?.textContent
+)
+
+// 旧提交的迟到成功：不得覆盖新检索的结果区与按钮状态，也不得报错
+await act(async () => {
+  releaseBatch()
+  await flush()
+})
+check('迟到成功不渲染旧结果提示', !container.querySelector('.batch-result'))
+check('迟到成功未产生错误提示', errors.length === 0, errors)
+check(
+  '迟到成功后按钮仍是可提交态',
+  applyBtn()?.textContent.includes('批量编码（2）') && !applyBtn()?.disabled,
+  applyBtn()?.textContent
+)
+
+// 新检索的命中可正常再次批量提交（批量写入仍可用）
+const beforeResubmit = batchCalls.length
+await clickBatch()
+check('新命中可再次批量提交', batchCalls.length === beforeResubmit + 1, batchCalls.length)
+check(
+  '再次提交结果提示正常渲染（既有标注全部跳过）',
+  /「焦虑」新增 0 条，跳过 2 条/.test(container.querySelector('.batch-result')?.textContent ?? ''),
+  container.querySelector('.batch-result')?.textContent
+)
+
+// ---------- 用例 11：提交在途时重新检索，旧提交的迟到失败不得报错或占用按钮 ----------
+errors.length = 0
+await typeKeyword('发作')
+await submitSearch()
+check('前置：B 命中显示', /「发作」命中 1 处/.test(container.textContent))
+await chooseCode()
+holdBatchFailure()
+await act(async () => {
+  applyBtn().click()
+  await tick()
+})
+check('提交在途显示提交中（将失败）', applyBtn()?.textContent.includes('提交中'), applyBtn()?.textContent)
+await submitSearch() // 同一关键词重新检索
+check(
+  '重新检索后按钮恢复可提交态',
+  applyBtn()?.textContent.includes('批量编码（1）') && !applyBtn()?.disabled,
+  applyBtn()?.textContent
+)
+await act(async () => {
+  releaseBatch() // 以失败回包释放旧提交
+  await flush()
+})
+check('旧提交迟到失败不产生错误提示', errors.length === 0, errors)
+check('迟到失败不渲染结果提示', !container.querySelector('.batch-result'))
+check(
+  '迟到失败后按钮仍是可提交态',
+  applyBtn()?.textContent.includes('批量编码（1）') && !applyBtn()?.disabled,
+  applyBtn()?.textContent
+)
 
 if (failures.length) {
   console.error(`\n${failures.length} 项失败`)

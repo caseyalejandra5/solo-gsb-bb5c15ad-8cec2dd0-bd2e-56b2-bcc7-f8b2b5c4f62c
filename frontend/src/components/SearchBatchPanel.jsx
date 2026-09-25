@@ -12,7 +12,10 @@ import { api } from '../api'
  *    使在途检索（及其迟到响应）彻底失效；
  *  - 响应落地前核对请求序号、当前文档以及回包自带的 document_id / query；
  *  - 批量提交前再核对所选命中仍属于当前文档与已检索关键词，失配即阻止写入、
- *    清空面板并提示重新检索。
+ *    清空面板并提示重新检索；
+ *  - 批量提交在途期间重新检索（含同一关键词）：发起新检索即解除旧提交对面板
+ *    的占用（复位「提交中」），旧提交的迟到成功 / 失败由序号守卫拦截，不覆盖
+ *    新检索的命中、结果提示或按钮状态。
  */
 export default function SearchBatchPanel({ docId, codes, onApplied, onError }) {
   const [query, setQuery] = useState('')
@@ -84,12 +87,15 @@ export default function SearchBatchPanel({ docId, codes, onApplied, onError }) {
     const targetDocId = docId
     const targetQuery = query
     const seq = ++reqSeqRef.current
-    // 发起新检索即作废旧关键词的命中 / 勾选：检索失败时也不会残留可批量写入的旧结果
+    // 发起新检索即作废旧关键词的命中 / 勾选：检索失败时也不会残留可批量写入的旧结果；
+    // 同时解除在途批量提交对面板的占用——其序号已被取号作废，迟到回包不会再复位
+    // 「提交中」，若不在此释放，新命中列表的批量按钮将一直卡死
     setSearching(true)
     setSearchedQuery(null)
     setMatches(null)
     setChecked(new Set())
     setResult(null)
+    setApplying(false)
     try {
       const data = await api.searchDocument(targetDocId, targetQuery)
       // 又发起了新检索 / 输入已改 / 已切到其它文档 / 回包文档或关键词不符：
