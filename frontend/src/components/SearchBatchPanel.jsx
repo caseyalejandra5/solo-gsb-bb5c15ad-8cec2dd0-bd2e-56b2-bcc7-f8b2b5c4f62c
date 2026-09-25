@@ -10,6 +10,9 @@ import { api } from '../api'
  *  - 检索成功时把当时的 query 锁进 searchedQuery，标题与结果均显示它而非输入框实时值；
  *  - 输入框一旦偏离 searchedQuery，立即清空旧命中 / 勾选 / 结果并取号，
  *    使在途检索（及其迟到响应）彻底失效；
+ *  - 发起新检索（含同一关键词重新检索）即解除旧批量提交对面板的占用：
+ *    applying 立即复位，否则旧提交在途时重新检索，序号虽被作废旧提交却永远
+ *    无法在 finally 里复位，新命中列表的批量按钮会一直停留在「提交中」；
  *  - 响应落地前核对请求序号、当前文档以及回包自带的 document_id / query；
  *  - 批量提交前再核对所选命中仍属于当前文档与已检索关键词，失配即阻止写入、
  *    清空面板并提示重新检索。
@@ -86,6 +89,10 @@ export default function SearchBatchPanel({ docId, codes, onApplied, onError }) {
     const seq = ++reqSeqRef.current
     // 发起新检索即作废旧关键词的命中 / 勾选：检索失败时也不会残留可批量写入的旧结果
     setSearching(true)
+    // 同时解除旧批量提交对面板的占用：旧提交序号已被上面取号作废，其成功 /
+    // 失败 / finally 都不会再落地（见 handleApply 的序号校验），故必须在这里
+    // 复位 applying，否则新命中的批量按钮会一直停留在「提交中」且无法操作。
+    setApplying(false)
     setSearchedQuery(null)
     setMatches(null)
     setChecked(new Set())
