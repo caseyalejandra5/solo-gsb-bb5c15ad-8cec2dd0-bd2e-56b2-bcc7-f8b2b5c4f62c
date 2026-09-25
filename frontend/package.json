@@ -1,0 +1,22 @@
+{
+  "name": "qual-coding-workbench",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:race": "esbuild race-test.mjs --bundle --format=esm --platform=node --jsx=automatic --packages=external --outfile=node_modules/.cache/race-test.bundle.mjs --log-level=warning && node node_modules/.cache/race-test.bundle.mjs",
+    "test:search-race": "esbuild search-race-test.mjs --bundle --format=esm --platform=node --jsx=automatic --packages=external --outfile=node_modules/.cache/search-race-test.bundle.mjs --log-level=warning && node node_modules/.cache/search-race-test.bundle.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "jsdom": "^29.1.1",
+    "vite": "^5.4.8"
+  }
+}
